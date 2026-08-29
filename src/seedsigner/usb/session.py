@@ -74,7 +74,8 @@ class UsbSessionRunner:
         """
         self._bind_gadget()
         try:
-            self._sock, self._gateway = gateway.spawn(hidg_device)
+            sock, self._gateway = gateway.spawn(hidg_device)
+            self._adopt(sock)
         except OSError:
             # The endpoint did not open. Take the gadget back off the bus rather than
             # leaving the device enumerated with nothing listening.
@@ -101,8 +102,20 @@ class UsbSessionRunner:
         Exists so the test suite can drive a whole session over a socketpair without a
         USB gadget, and so a developer can point the session at a host emulator.
         """
-        self._sock = sock
+        self._adopt(sock)
         self._gateway = None
+
+    # How long the app will wait for the rest of a message whose length prefix already
+    # arrived. The gateway is the process this design assumes can be compromised, and a
+    # compromised gateway that announced a length and then went quiet would block the UI
+    # thread inside recv -- leaving the user unable to press the button that unbinds the
+    # gadget. A local socketpair delivers a full message in milliseconds, so anything near
+    # this bound is a peer that has stopped behaving.
+    LINK_TIMEOUT_SECONDS = 2.0
+
+    def _adopt(self, sock: socket.socket) -> None:
+        sock.settimeout(self.LINK_TIMEOUT_SECONDS)
+        self._sock = sock
 
     def stop(self) -> None:
         if self._sock is not None and self._gateway is not None:

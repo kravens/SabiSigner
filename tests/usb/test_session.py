@@ -9,6 +9,8 @@ import base64
 import json
 import os
 import socket
+import struct
+import time
 
 import pytest
 from embit import ec
@@ -210,3 +212,27 @@ def test_stopping_the_session_drops_the_authorization(linked):
 
     runner.stop()
     assert runner.authorization is None
+
+
+def test_a_stalled_link_does_not_block_the_screen():
+    """
+    A gateway that announces a message length and then goes quiet must not wedge the app.
+
+    The gateway is the process the design assumes can be taken over, and blocking the view
+    thread inside recv would leave the user unable to press the button that takes the
+    gadget back off the bus. It has to end the session instead.
+    """
+    app_sock, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    runner = UsbSessionRunner(seed=make_seed())
+    runner.attach(app_sock)
+
+    # A length prefix promising 1000 bytes, followed by nothing at all.
+    peer.sendall(struct.pack(">I", 1000))
+
+    started = time.monotonic()
+    assert runner.pump(timeout=0.5) is True
+    elapsed = time.monotonic() - started
+
+    assert runner.state == SessionState.ENDED
+    assert elapsed < runner.LINK_TIMEOUT_SECONDS + 2
+    peer.close()
