@@ -120,7 +120,7 @@ class UsbSessionView(View):
                 ErrorScreen,
                 title=_("USB"),
                 status_headline=_("USB unavailable"),
-                text=_("The USB gadget could not be started: {}").format(e),
+                text=_("The USB gadget could not be started: {}").format(_short(e)),
                 button_data=[ButtonOption(_mft("OK"))],
             )
             return Destination(BackStackView)
@@ -170,10 +170,10 @@ class UsbSessionView(View):
         enumerates nothing, and that is a property they should know they are giving up.
         """
         selected_menu_num = self.run_screen(
-            WarningScreen,
+            UsbConfirmScreen,
             title=_("USB Session"),
             status_headline=_("Device goes online"),
-            text=_("Your computer will see this device until you leave this screen. Your seed never leaves it."),
+            body=_("Your computer sees this device only while this screen is open. Your seed never leaves it."),
             button_data=[self.START, self.CANCEL],
         )
         return selected_menu_num == 0
@@ -194,7 +194,8 @@ class UsbSessionView(View):
             # The reason can quote text the host chose (a JSON parse error, for instance),
             # so it is clamped before it reaches a TextArea.
             reason = self.runner.last_error
-            return (_("Session ended"), reason[:MAX_STATUS_CHARS] if reason else _("Closed."))
+            detail = reason[:MAX_STATUS_CHARS] if reason else _("Closed.")
+            return (_("Session ended"), detail + "\n\n" + _("Press left to go back."))
 
         authorization = self.runner.authorization
         if authorization is None:

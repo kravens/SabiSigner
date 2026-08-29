@@ -108,6 +108,20 @@ comparison. Nothing on the device can tell whether the user actually looked.
 **Traffic analysis.** Record sizes and timing are not padded. An observer on the cable
 learns roughly how large each message is and when it happened.
 
+**A coordinator that simulates the other participants.** The four-foreign-input minimum
+proves the transaction has the *shape* of a mix, not that four other humans are in it. A
+coordinator can always supply inputs it controls. This costs the user privacy -- they
+believe they mixed and did not -- and it is not something a signing device can detect,
+because on-chain the two cases are identical. What the check does guarantee is that a
+"coinjoin authorization" cannot be spent on a plain transfer out of the wallet, which is
+the part that costs money rather than privacy.
+
+**A coordinator that wastes the user's time.** A psbt packed with derivation claims against
+the device's own fingerprint forces a key derivation per claim. The psbt size limit caps
+this at a few tens of seconds on the slowest supported board, so the worst case is a device
+that is unresponsive for a while and then refuses the round. No signature is produced and
+nothing is spent, so this is left as a bounded annoyance rather than defended against.
+
 **seccomp confinement of the gateway process.** The image has no `libseccomp`, and adding a
 hand-rolled BPF filter to a signing device to defend a process that already runs as `nobody`
 with one file descriptor was not judged to be worth its own risk. This is a deliberate
