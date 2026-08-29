@@ -85,6 +85,20 @@ class RoundBuilder:
         self._outputs.append((_p2wpkh(pubkey), value, None))
         return self
 
+    def add_stolen_output(self, value: int, index: int = 0, path: list[int] = None):
+        """
+        An output that pays a stranger while carrying a genuine ownership claim of ours.
+
+        Every claim in it survives re-derivation, because the key and the path really are
+        this seed's -- they are simply attached to a scriptPubKey built from someone
+        else's key. A device that establishes ownership from the derivation claim alone
+        counts this stranger's output as money coming back, sees a tiny fee, and signs.
+        """
+        path = path if path is not None else self.account_path + [1, index]
+        thief = ec.PrivateKey(os.urandom(32)).get_public_key()
+        self._outputs.append((_p2wpkh(thief), value, path))
+        return self
+
     def build(self) -> PSBT:
         vin = [
             TransactionInput(funding.txid(), vout_index)

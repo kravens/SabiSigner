@@ -65,6 +65,16 @@ def hkdf(ikm: bytes, salt: bytes, info: bytes, length: int) -> bytes:
     return okm[:length]
 
 
+def _xor(data: bytes, keystream: bytes) -> bytes:
+    """
+    XOR two equal-length byte strings.
+
+    Done as one big-integer operation rather than a per-byte loop: a coinjoin psbt runs to
+    tens of kilobytes and this is on the path of every round, on a single-core Pi Zero.
+    """
+    return (int.from_bytes(data, "big") ^ int.from_bytes(keystream, "big")).to_bytes(len(data), "big")
+
+
 def _keystream(key: bytes, nonce: bytes, length: int) -> bytes:
     """
     Counter-mode keystream from HMAC-SHA256.
@@ -109,9 +119,7 @@ class SessionChannel:
 
     def seal(self, plaintext: bytes) -> bytes:
         nonce = self._send.next_nonce()
-        ciphertext = bytes(
-            a ^ b for a, b in zip(plaintext, _keystream(self._send.enc_key, nonce, len(plaintext)))
-        )
+        ciphertext = _xor(plaintext, _keystream(self._send.enc_key, nonce, len(plaintext)))
         tag = hmac.new(self._send.mac_key, nonce + ciphertext, hashlib.sha256).digest()[:TAG_SIZE]
         return nonce + ciphertext + tag
 
@@ -140,9 +148,7 @@ class SessionChannel:
             raise ChannelError("unexpected record counter (replay or reorder)")
         self._recv.counter += 1
 
-        return bytes(
-            a ^ b for a, b in zip(ciphertext, _keystream(self._recv.enc_key, nonce, len(ciphertext)))
-        )
+        return _xor(ciphertext, _keystream(self._recv.enc_key, nonce, len(ciphertext)))
 
 
 def _derive(shared: bytes, host_pub: bytes, device_pub: bytes) -> tuple[DirectionKeys, DirectionKeys, str]:

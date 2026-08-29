@@ -30,7 +30,7 @@ The authorization lives in RAM inside the session and dies with it, like the see
 """
 import logging
 
-from embit import bip32
+from embit import bip32, script
 from embit.psbt import PSBT
 from embit.networks import NETWORKS
 from embit.transaction import SIGHASH
@@ -154,6 +154,41 @@ def _is_under_account(path: list[int], account_path: list[int]) -> bool:
     return len(path) >= len(account_path) and list(path[: len(account_path)]) == list(account_path)
 
 
+def _script_for_key(script_type: str, key) -> "script.Script | None":
+    """Rebuild the scriptPubKey a given key would be paid through, for the single-sig types."""
+    if script_type == "p2wpkh":
+        return script.p2wpkh(key)
+    if script_type == "p2sh":
+        # The only p2sh shape a single-sig coinjoin wallet uses is a wrapped p2wpkh.
+        return script.p2sh(script.p2wpkh(key))
+    if script_type == "p2pkh":
+        return script.p2pkh(key)
+    if script_type == "p2tr":
+        return script.p2tr(key)
+    return None
+
+
+def _pays_our_key(script_pubkey, path: list[int], root: bip32.HDKey, cache: dict) -> bool:
+    """
+    Check that `script_pubkey` is actually built from the key at `path`.
+
+    This is the check that makes an ownership claim mean something. A psbt scope's
+    derivation entries say "this key belongs to your seed" -- and re-deriving the key
+    proves that much -- but they say nothing about whether the output being paid has
+    anything to do with that key. A coordinator can attach a genuine claim of ours to an
+    output whose scriptPubKey pays a stranger. A device that stopped at the claim would
+    count that stranger's output as its own money coming back, compute a tiny fee, and
+    sign the round away. So the claim is only accepted once the script it is attached to
+    has been rebuilt from the key and compared byte for byte.
+
+    Anything that is not one of the single-sig shapes above returns False: a coinjoin the
+    device cannot reconstruct is one it will not sign unattended.
+    """
+    key = PSBTParser._derive_with_cache(root, path, cache)
+    expected = _script_for_key(script_pubkey.script_type(), key)
+    return expected is not None and expected.data == script_pubkey.data
+
+
 def validate_coinjoin_psbt(
     psbt: PSBT,
     seed: Seed,
@@ -213,6 +248,15 @@ def validate_coinjoin_psbt(
                 f"{bip32.path_to_str(authorization.account_path)}"
             )
 
+        utxo = inp.utxo
+        if utxo is None:
+            raise CoinjoinPolicyError(f"Input {i} carries no utxo to read its value from")
+
+        if not _pays_our_key(utxo.script_pubkey, path, root, derivation_cache):
+            raise CoinjoinPolicyError(
+                f"Input {i} claims one of our keys but is not paid to it"
+            )
+
         if inp.sighash_type not in ACCEPTABLE_SIGHASHES:
             raise CoinjoinPolicyError(f"Input {i} requests a non-standard sighash")
 
@@ -222,9 +266,6 @@ def validate_coinjoin_psbt(
         # supplied previous transaction and checks it against the outpoint, which is what
         # makes the amount real. Taproot's sighash commits to every spent amount, so a lie
         # there simply produces an invalid signature and witness_utxo alone is safe.
-        utxo = inp.utxo
-        if utxo is None:
-            raise CoinjoinPolicyError(f"Input {i} carries no utxo to read its value from")
         if utxo.script_pubkey.script_type() != "p2tr":
             if inp.non_witness_utxo is None:
                 raise CoinjoinPolicyError(
@@ -256,6 +297,10 @@ def validate_coinjoin_psbt(
             raise CoinjoinPolicyError(
                 f"Output {i} at {bip32.path_to_str(path)} is outside the authorized account"
             )
+        if not _pays_our_key(vout[i].script_pubkey, path, root, derivation_cache):
+            raise CoinjoinPolicyError(
+                f"Output {i} claims one of our keys but pays a different script"
+            )
         our_output_indexes.append(i)
         our_output_sat += vout[i].value
 
@@ -282,6 +327,11 @@ def validate_coinjoin_psbt(
     return summary
 
 
+def _signature_keys(inp) -> set:
+    """The set of public keys this input already carries a signature for."""
+    return set(inp.partial_sigs.keys()) | set(inp.taproot_sigs.keys())
+
+
 def sign_coinjoin_round(psbt: PSBT, seed: Seed, authorization: CoinjoinAuthorization) -> tuple[PSBT, CoinjoinRoundSummary]:
     """
     Validate and sign one round, then charge it against the budget.
@@ -290,7 +340,12 @@ def sign_coinjoin_round(psbt: PSBT, seed: Seed, authorization: CoinjoinAuthoriza
     what to sign on its own, and its ownership test is looser than ours in one corner
     (it compares ecdsa keys x-only). Rather than reason about whether that gap is
     reachable, the signed result is checked against the set of inputs the policy actually
-    approved, and a signature anywhere else discards the whole round.
+    approved, and a *new* signature anywhere else discards the whole round.
+
+    "New" is the load-bearing word. By the time a round reaches the device the coordinator
+    has usually collected other participants' signatures already, so the psbt arrives with
+    signatures on inputs that are not ours and never will be. Rejecting on their mere
+    presence would refuse every real round.
     """
     summary = validate_coinjoin_psbt(psbt, seed, authorization)
 
@@ -303,16 +358,20 @@ def sign_coinjoin_round(psbt: PSBT, seed: Seed, authorization: CoinjoinAuthoriza
     # embit resolves the sighash per input type from its default: DEFAULT for taproot,
     # ALL for everything else. Forcing ALL here would make taproot signatures carry an
     # explicit sighash byte for no reason.
+    signatures_before = [_signature_keys(inp) for inp in psbt.inputs]
+
     psbt.sign_with(root)
 
     approved = set(summary.our_input_indexes)
     for i, inp in enumerate(psbt.inputs):
-        if (inp.partial_sigs or inp.taproot_sigs) and i not in approved:
+        if i in approved:
+            continue
+        if _signature_keys(inp) - signatures_before[i]:
             raise CoinjoinPolicyError(
                 f"Refusing round: a signature landed on input {i}, which the policy did not approve"
             )
 
-    if not any(psbt.inputs[i].partial_sigs or psbt.inputs[i].taproot_sigs for i in approved):
+    if not any(_signature_keys(psbt.inputs[i]) - signatures_before[i] for i in approved):
         raise CoinjoinPolicyError("Round produced no signatures")
 
     authorization.consume(summary.our_fee_sat)

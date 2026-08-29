@@ -10,6 +10,7 @@ import os
 import socket
 import struct
 import subprocess
+import tty
 import sys
 
 import pytest
@@ -133,3 +134,30 @@ def test_short_reports_are_rejected(gateway_child):
 
     process.wait(timeout=10)
     assert app.recv(4) == b""
+
+
+def test_spawn_starts_a_working_gateway():
+    """
+    Exercises spawn() itself, not just the child's entry point: opening the endpoint,
+    handing both descriptors across the exec, and pointing the child at the package.
+
+    A pty stands in for /dev/hidg0. It is the one thing on a dev machine that behaves like
+    the HID gadget's character device -- a file descriptor that reads what the other end
+    writes -- and it makes this the only test that proves the whole spawn path works
+    without a Raspberry Pi.
+    """
+    master_fd, slave_fd = os.openpty()
+    tty.setraw(master_fd)
+    tty.setraw(slave_fd)
+    slave_path = os.ttyname(slave_fd)
+    os.close(slave_fd)
+
+    sock, process = gateway.spawn(slave_path)
+    sock.settimeout(10)
+    try:
+        for report in encode(b"hello from the host"):
+            os.write(master_fd, report)
+        assert _recv_app_message(sock) == b"hello from the host"
+    finally:
+        gateway.stop(sock, process)
+        os.close(master_fd)

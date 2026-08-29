@@ -4,11 +4,19 @@ The checks that decide whether a round signs without a human looking at it.
 Each test bends exactly one thing about an otherwise-valid round, so a failure here names
 the check that stopped working rather than "coinjoin broke".
 """
+import os
+
 import pytest
+from unittest.mock import patch
+
+from embit import ec
 
 from seedsigner.usb import policy
 from seedsigner.usb.policy import CoinjoinAuthorization, CoinjoinPolicyError
 
+from embit.psbt import DerivationPath
+
+from usb import coinjoin_util
 from usb.coinjoin_util import ACCOUNT_PATH, OTHER_ACCOUNT_PATH, RoundBuilder, make_seed, standard_round
 
 
@@ -361,3 +369,102 @@ def test_account_prefix_matching_is_not_fooled_by_a_shared_prefix(seed):
     assert not policy._is_under_account(OTHER_ACCOUNT_PATH + [0, 0], ACCOUNT_PATH)
     assert not policy._is_under_account([84 + 2**31, 0 + 2**31], ACCOUNT_PATH)
     assert not policy._is_under_account([84 + 2**31, 0 + 2**31, 0], ACCOUNT_PATH)
+
+
+class TestOwnershipIsBoundToTheScript:
+    """
+    A derivation claim says "this key is yours". It does not say "this output pays that
+    key". Establishing ownership from the claim alone lets a coordinator label a stranger's
+    output as ours: the value check then balances, and the device signs a round that sends
+    the user's coins away. The claim has to be bound to the scriptPubKey that is actually
+    being paid.
+    """
+
+    def test_an_output_paying_a_stranger_cannot_claim_to_be_ours(self):
+        seed = coinjoin_util.make_seed()
+        authorization = policy.CoinjoinAuthorization(
+            coordinator="wasabi.example",
+            account_path=coinjoin_util.ACCOUNT_PATH,
+            max_rounds=10,
+            max_fee_per_round_sat=1_000,
+            max_total_fee_sat=10_000,
+        )
+
+        builder = coinjoin_util.RoundBuilder(seed)
+        builder.add_our_input(100_000)
+        for _ in range(5):
+            builder.add_foreign_input()
+        # The whole 99,000 sats leaves for a stranger's key, dressed up as ours.
+        builder.add_stolen_output(99_000)
+        for _ in range(5):
+            builder.add_foreign_output()
+
+        with pytest.raises(policy.CoinjoinPolicyError):
+            policy.validate_coinjoin_psbt(builder.build(), seed, authorization)
+
+
+    def test_an_input_paying_a_stranger_cannot_claim_to_be_ours(self):
+        """
+        The same binding on the input side. A false input claim inflates what the device
+        believes it put in, and it must not be read off an unrelated scriptPubKey.
+        """
+        seed = coinjoin_util.make_seed()
+        authorization = policy.CoinjoinAuthorization(
+            coordinator="wasabi.example",
+            account_path=coinjoin_util.ACCOUNT_PATH,
+            max_rounds=10,
+            max_fee_per_round_sat=1_000,
+            max_total_fee_sat=10_000,
+        )
+
+        psbt = coinjoin_util.standard_round(seed)
+
+        # Attach one of our genuine keys to a foreign input's scope.
+        root = coinjoin_util.make_root(seed)
+        path = coinjoin_util.ACCOUNT_PATH + [0, 7]
+        pubkey = root.derive(path).get_public_key()
+        psbt.inputs[1].bip32_derivations[pubkey] = DerivationPath(root.my_fingerprint, path)
+
+        with pytest.raises(policy.CoinjoinPolicyError):
+            policy.validate_coinjoin_psbt(psbt, seed, authorization)
+
+
+class TestSignaturesAlreadyOnTheRound:
+    """
+    By the time a round reaches the device, the coordinator has usually gathered other
+    participants' signatures. Those belong on inputs the device will never approve, and
+    their presence is normal rather than an attack.
+    """
+
+    def test_other_participants_signatures_do_not_block_the_round(self, seed, auth):
+        psbt = standard_round(seed)
+
+        # A foreign participant's signature, already collected by the coordinator.
+        stranger = ec.PrivateKey(os.urandom(32))
+        psbt.inputs[1].partial_sigs[stranger.get_public_key()] = b"\x30\x44" + b"\x00" * 68
+
+        signed, summary = policy.sign_coinjoin_round(psbt, seed, auth)
+
+        assert summary.foreign_input_count >= policy.MIN_FOREIGN_INPUTS
+        assert signed.inputs[0].partial_sigs
+
+
+    def test_a_new_signature_on_an_unapproved_input_still_discards_the_round(self, seed, auth):
+        """
+        The check that this fix must not weaken: a signature the device itself produced on
+        an input the policy never approved.
+        """
+        psbt = standard_round(seed)
+        root = coinjoin_util.make_root(seed)
+
+        original_sign_with = type(psbt).sign_with
+
+        def sign_everything(self, rootkey, *args, **kwargs):
+            count = original_sign_with(self, rootkey, *args, **kwargs)
+            # Forge a signature onto a foreign input, as a looser signer might.
+            self.inputs[1].partial_sigs[root.derive(ACCOUNT_PATH + [0, 0]).get_public_key()] = b"\x30\x44" + b"\x00" * 68
+            return count
+
+        with patch.object(type(psbt), "sign_with", sign_everything):
+            with pytest.raises(CoinjoinPolicyError, match="did not approve"):
+                policy.sign_coinjoin_round(psbt, seed, auth)

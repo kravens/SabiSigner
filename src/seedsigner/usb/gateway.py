@@ -163,10 +163,22 @@ def spawn(hidg_device: str = HIDG_DEVICE) -> tuple[socket.socket, subprocess.Pop
     # privilege that opening it required.
     hid_fd = os.open(hidg_device, os.O_RDWR)
 
+    # `python3 -m` would normally find the package via the current directory, which on the
+    # device happens to be right. Naming the directory the running package was imported
+    # from removes the dependency on that coincidence: a gateway that fails to start is a
+    # USB feature that silently does nothing.
+    import seedsigner
+    package_root = os.path.dirname(os.path.dirname(os.path.abspath(seedsigner.__file__)))
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [package_root] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+    )
+
     try:
         process = subprocess.Popen(
             [sys.executable, "-m", "seedsigner.usb.gateway", str(hid_fd), str(child_sock.fileno())],
             pass_fds=(hid_fd, child_sock.fileno()),
+            env=env,
         )
     finally:
         # The parent has no further use for either: the child holds the endpoint, and the
