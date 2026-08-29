@@ -77,6 +77,13 @@ controller driver, no HID driver, no mass-storage driver, no driver of any kind 
 bind to a device plugged into the port. A malicious USB device attached to a SabiSigner is
 electrically connected to a kernel that cannot talk to it.
 
+That claim is checked against the kernel config that was actually compiled, not the one in
+the repository, by `opt/verify-usb-config.sh` in the SabiSigner-os tree. The distinction is
+not pedantry: kconfig silently turns `CONFIG_USB` back on for any enabled symbol that
+`select`s it, and three of the four boards shipped exactly that way until the generated
+config was read. Anyone reproducing a build should run that script against their own
+`.config` rather than trusting this paragraph.
+
 **A device that is plugged in but not in use.** The gadget is created at boot but its UDC
 is bound only while the user is on the USB screen. A SabiSigner sitting in a laptop's USB
 port enumerates as nothing at all. Leaving the screen unbinds it and destroys the session
