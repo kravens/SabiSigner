@@ -1,3 +1,40 @@
+# SabiSigner
+
+**A fork of [SeedSigner](https://github.com/SeedSigner/seedsigner) that adds a narrow,
+privacy-focused USB path so [Wasabi](https://wasabiwallet.io) can run remote coinjoin
+rounds against the device.** Everything else about SeedSigner is unchanged: it still boots
+entirely from RAM, still holds no state between sessions, still takes its seed from a QR
+code at the start of a session, and still signs ordinary transactions over QR.
+
+What the fork adds:
+
+* **A USB session, off by default in the strongest sense.** The gadget is bound to the USB
+  controller only while the user is on the USB screen. A SabiSigner sitting in a laptop's
+  port enumerates as nothing at all.
+* **No USB host stack in the kernel.** `CONFIG_USB` is unset; only the peripheral (gadget)
+  side is compiled in. There is no driver that could bind to a device plugged into the
+  port, so BadUSB-class attacks have nothing to attach to.
+* **An encrypted, paired session.** Ephemeral ECDH, an encrypt-then-MAC record layer, and
+  six pairing digits derived from the handshake transcript that the user compares against
+  the host's screen. That comparison is what defeats an interposer in the cable.
+* **Unattended coinjoin signing, bounded by an on-device policy.** The user approves a
+  coordinator, an account, a round count and a fee budget once. Each round is then checked
+  by the device -- it must be a real mix, every signed input and returned output must sit
+  under the approved account and be paid to a key the device rebuilt itself, and the budget
+  must not have run out.
+* **No seed ever leaves.** There is no request that exports a seed, because no such
+  operation exists in the application for the USB layer to reach.
+
+[**docs/usb_security.md**](docs/usb_security.md) is the threat model, including what is
+deliberately *not* defended. Read it before trusting the USB path with anything.
+
+`tools/usb_host_demo.py` is a minimal host implementation for exercising the device
+without Wasabi.
+
+Images are built from [SabiSigner-os](https://github.com/kravens/SabiSigner-os).
+
+---------------
+
 # Build an offline, airgapped Bitcoin signing device for less than $50!
 
 ![Image of SeedSigners in Mini Pill Enclosures](docs/img/Mini_Pill_Main_Photo.jpg)

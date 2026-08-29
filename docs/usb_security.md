@@ -33,6 +33,16 @@ independently re-derives ownership of every input and output rather than believi
 derivation paths the host claims. A forged ownership claim fails the re-derivation and the
 whole round is refused.
 
+**An ownership claim attached to somebody else's output.** Re-deriving a key proves the
+key belongs to the seed. It proves nothing about whether the output being paid has
+anything to do with that key, and a coordinator can attach one of the user's genuine keys,
+at its genuine path, to an output whose scriptPubKey pays a stranger. A device that stopped
+at the claim would count that output as its own money coming back, compute a fee of nearly
+zero, and sign the round. So ownership is established only once the scriptPubKey has been
+rebuilt from the derived key and compared byte for byte, on inputs and outputs alike.
+Anything the device cannot reconstruct -- any script shape outside single-sig p2wpkh,
+p2sh-p2wpkh, p2pkh and p2tr -- is refused rather than assumed.
+
 **The miner-fee attack** (the Trezor 1.9.1 / 2.3.1 class of bug). Pre-taproot sighashes
 commit only to the amount of the input being signed, so a host can lie about the *other*
 inputs' amounts and steal the difference as miner fee. Non-taproot inputs are therefore
