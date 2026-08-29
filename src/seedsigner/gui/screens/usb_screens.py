@@ -91,7 +91,10 @@ class UsbSessionScreen(BaseTopNavScreen):
 
             update = self.pump() if self.pump else None
 
-            if isinstance(update, int):
+            # bool is an int subclass, and the obvious wrong edit to the View is to return
+            # the pump's own True/False straight through. That would exit the screen the
+            # instant a message arrived, with no clue why.
+            if isinstance(update, int) and not isinstance(update, bool):
                 return update
 
             if update is not None:
