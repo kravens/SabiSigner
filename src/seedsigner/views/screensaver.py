@@ -106,9 +106,33 @@ class OpeningSplashScreen(LogoScreen):
         version_y = int(self.canvas_height/2) + int(logo_height/2) + logo_offset_y + GUIConstants.COMPONENT_PADDING
         version_max_chars = 20
         self.renderer.draw.text(xy=(version_x, version_y), text=version[:version_max_chars], font=font, fill=GUIConstants.ACCENT_COLOR, anchor="mt")
+        next_y = version_y + GUIConstants.get_top_nav_title_font_size()
         if len(version) > version_max_chars:
             # Squeeze a second version display line in if needed
-            self.renderer.draw.text(xy=(version_x, version_y + GUIConstants.get_top_nav_title_font_size()), text=version[version_max_chars:], font=font, fill=GUIConstants.ACCENT_COLOR, anchor="mt")
+            self.renderer.draw.text(xy=(version_x, next_y), text=version[version_max_chars:], font=font, fill=GUIConstants.ACCENT_COLOR, anchor="mt")
+            next_y += GUIConstants.get_top_nav_title_font_size()
+
+        # Build fingerprint, shown on every boot before the user can reach seed entry.
+        #
+        # This is the one identifier that distinguishes the image the user verified and
+        # flashed from any other build, so it is on screen before there is anything to
+        # steal. Its honest limit is worth stating: an attacker who replaced the whole
+        # image controls this text too. What it does catch is the realistic case -- an
+        # unofficial or accidentally-different build, or a card that is not the one the
+        # user flashed -- and on hardware with a boot-ROM root of trust (Pi 4 / CM4 with
+        # signed boot) it is backed by something the attacker cannot forge. See
+        # docs/usb_security.md.
+        commit_hash = Version.get_short_commit_hash()
+        if commit_hash:
+            build_font = Fonts.get_font(GUIConstants.get_body_font_name(), GUIConstants.get_body_font_size())
+            self.renderer.draw.text(
+                xy=(version_x, next_y),
+                # TRANSLATOR_NOTE: Boot screen build identifier, e.g. "build 1a2b3c4"
+                text=_("build {}").format(commit_hash),
+                font=build_font,
+                fill="#ccc",
+                anchor="mt",
+            )
 
         if not self.renderer.is_screenshot_generator:
             self.renderer.show_image()

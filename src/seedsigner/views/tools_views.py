@@ -24,9 +24,10 @@ class ToolsMenuView(View):
     KEYBOARD = ButtonOption("Calc 12th/24th word", FontAwesomeIconConstants.KEYBOARD)
     ADDRESS_EXPLORER = ButtonOption("Address explorer")
     VERIFY_ADDRESS = ButtonOption("Verify address")
+    USB = ButtonOption("USB session")
 
     def run(self):
-        button_data = [self.IMAGE, self.DICE, self.KEYBOARD, self.ADDRESS_EXPLORER, self.VERIFY_ADDRESS]
+        button_data = [self.IMAGE, self.DICE, self.KEYBOARD, self.ADDRESS_EXPLORER, self.VERIFY_ADDRESS, self.USB]
 
         selected_menu_num = self.run_screen(
             ButtonListScreen,
@@ -53,6 +54,10 @@ class ToolsMenuView(View):
         elif button_data[selected_menu_num] == self.VERIFY_ADDRESS:
             from seedsigner.views.scan_views import ScanAddressView
             return Destination(ScanAddressView)
+
+        elif button_data[selected_menu_num] == self.USB:
+            from seedsigner.views.usb_views import UsbSessionView
+            return Destination(UsbSessionView)
 
 
 
