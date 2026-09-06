@@ -133,7 +133,11 @@ def test_authorization_requires_confirmation(session):
 
 
 def test_authorized_rounds_sign_without_further_confirmation(session):
-    assert call(session, dict(AUTH_REQUEST))["t"] == "ok"
+    authorized = call(session, dict(AUTH_REQUEST))
+    assert authorized["t"] == "ok"
+    # The master fingerprint, 4 bytes as hex; a bridge identifies the wallet to Wasabi by it.
+    assert authorized["fingerprint"] == session.seed.get_fingerprint()
+    assert len(authorized["fingerprint"]) == 8
 
     psbt_b64 = standard_round(session.seed).to_base64()
     # DENY: after the authorization the device must not be asking again, so a confirm

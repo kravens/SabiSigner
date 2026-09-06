@@ -216,7 +216,14 @@ class UsbSession:
             max_total_fee_sat=max_total_fee_sat,
             network=self.network,
         )
-        return {"authorized": True, "rounds_remaining": self.authorization.rounds_remaining}
+        # The master fingerprint rides along so a bridge can tell Wasabi which wallet this
+        # device serves without a second prompt: the user just approved this seed for
+        # coinjoin, and the fingerprint is the identity of the wallet Wasabi already holds.
+        return {
+            "authorized": True,
+            "rounds_remaining": self.authorization.rounds_remaining,
+            "fingerprint": self.seed.get_fingerprint(self.network),
+        }
 
     def _handle_sign_coinjoin(self, request: dict, confirm) -> dict:
         self._require_seed()
