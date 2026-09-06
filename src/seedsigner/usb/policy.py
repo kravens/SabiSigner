@@ -150,8 +150,35 @@ class CoinjoinRoundSummary:
         return self.our_input_sat - self.our_output_sat
 
 
+# BIP-84 (native segwit) and BIP-86 (taproot). A Wasabi wallet is one of each with the same
+# coin type and account index, and a coinjoin pays our change and mixed outputs to either,
+# so an authorization for one account has to cover its sibling or the device refuses the
+# very rounds it was authorized for. Nothing else is widened: the coin type and account
+# index still have to match exactly, and no other purpose is a sibling of anything.
+SIBLING_PURPOSES = (84 + 2**31, 86 + 2**31)
+
+
 def is_under_account(path: list[int], account_path: list[int]) -> bool:
-    return len(path) >= len(account_path) and list(path[: len(account_path)]) == list(account_path)
+    path, account_path = list(path), list(account_path)
+    if len(path) < len(account_path):
+        return False
+    if path[: len(account_path)] == account_path:
+        return True
+    return (
+        len(account_path) == 3
+        and account_path[0] in SIBLING_PURPOSES
+        and path[0] in SIBLING_PURPOSES
+        and path[1:3] == account_path[1:3]
+    )
+
+
+def describe_account_scope(account_path: list[int]) -> str:
+    """What the authorization prompt shows: the account, plus its sibling when there is one."""
+    text = bip32.path_to_str(account_path)
+    if len(account_path) == 3 and account_path[0] in SIBLING_PURPOSES:
+        other = next(p for p in SIBLING_PURPOSES if p != account_path[0])
+        text += f" +{other - 2**31}'"
+    return text
 
 
 def _script_for_key(script_type: str, key) -> "script.Script | None":

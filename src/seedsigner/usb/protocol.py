@@ -198,7 +198,8 @@ class UsbSession:
 
         details = {
             "coordinator": coordinator,
-            "account_path": account_path_str,
+            # Shown with its BIP-84/86 sibling when the scope includes one (see policy).
+            "account_path": policy.describe_account_scope(account_path),
             "max_rounds": max_rounds,
             "max_fee_per_round_sat": max_fee_per_round_sat,
             "max_total_fee_sat": max_total_fee_sat,

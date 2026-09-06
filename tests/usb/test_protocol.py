@@ -173,7 +173,9 @@ def test_ownership_proofs_are_unattended_and_verify(session):
 
     call(session, dict(AUTH_REQUEST))
     commitment = b"round-id||coordinator"
-    for script_type, path in [("p2wpkh", ACCOUNT_PATH + [0, 3]), ("p2tr", ACCOUNT_PATH + [1, 7])]:
+    # The taproot key lives in the BIP-86 sibling account, which the 84' authorization covers.
+    taproot_account = [86 + 2**31] + ACCOUNT_PATH[1:]
+    for script_type, path in [("p2wpkh", ACCOUNT_PATH + [0, 3]), ("p2tr", taproot_account + [1, 7])]:
         request = {
             "t": "get_ownership_proof",
             "path": "m/" + "/".join(str(i - 2**31) + "'" if i >= 2**31 else str(i) for i in path),

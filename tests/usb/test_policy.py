@@ -371,6 +371,25 @@ def test_account_prefix_matching_is_not_fooled_by_a_shared_prefix(seed):
     assert not policy.is_under_account([84 + 2**31, 0 + 2**31, 0], ACCOUNT_PATH)
 
 
+def test_the_taproot_sibling_account_is_in_scope_and_nothing_else_is():
+    """
+    A Wasabi wallet is m/84'/c'/a' and m/86'/c'/a' together, and a round pays our outputs to
+    either, so the two are one scope. Same coin and index only; no other purpose joins.
+    """
+    H = 2**31
+    segwit, taproot = [84 + H, 0 + H, 0 + H], [86 + H, 0 + H, 0 + H]
+    assert policy.is_under_account(taproot + [1, 3], segwit)
+    assert policy.is_under_account(segwit + [0, 0], taproot)
+    assert not policy.is_under_account([86 + H, 0 + H, 1 + H, 0, 0], segwit)   # other index
+    assert not policy.is_under_account([86 + H, 1 + H, 0 + H, 0, 0], segwit)   # other coin
+    assert not policy.is_under_account([49 + H, 0 + H, 0 + H, 0, 0], segwit)   # not a sibling
+    assert not policy.is_under_account([86 + H, 0 + H], segwit)                # too short
+    # A deeper authorization is a plain prefix and gains no sibling.
+    assert not policy.is_under_account(taproot + [0, 0], segwit + [0])
+    assert policy.describe_account_scope(segwit) == "m/84h/0h/0h +86'"
+    assert policy.describe_account_scope([49 + H, 0 + H, 0 + H]) == "m/49h/0h/0h"
+
+
 class TestOwnershipIsBoundToTheScript:
     """
     A derivation claim says "this key is yours". It does not say "this output pays that
