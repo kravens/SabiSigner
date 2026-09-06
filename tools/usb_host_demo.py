@@ -17,6 +17,9 @@ The device node is whichever /dev/hidrawN appeared when the SabiSigner bound its
 `ls -l /sys/class/hidraw/*/device/../..` will point at the right one. Reading and writing
 it usually needs root or a udev rule.
 
+On macOS (or anywhere without hidraw) use `--device hidapi`, which needs `pip install hidapi`
+and finds the device by its USB ids; no root needed there.
+
 Compare the six digits this prints against the six digits on the device screen before
 answering yes. That comparison is the only thing standing between this session and
 something sitting in the middle of the cable.
@@ -57,6 +60,33 @@ class HidLink:
         os.close(self.fd)
 
 
+class HidapiLink:
+    """Whole messages through the hidapi library, for hosts without /dev/hidraw (macOS)."""
+
+    VENDOR_ID = 0x1209
+    PRODUCT_ID = 0x0001
+
+    def __init__(self):
+        import hid  # pip install hidapi
+        self.dev = hid.device()
+        self.dev.open(self.VENDOR_ID, self.PRODUCT_ID)
+        self.decoder = hidframe.Decoder()
+
+    def send(self, message: bytes) -> None:
+        for report in hidframe.encode(message):
+            self.dev.write(b"\x00" + report)
+
+    def receive(self) -> bytes:
+        while True:
+            report = bytes(self.dev.read(hidframe.REPORT_SIZE))
+            message = self.decoder.push(report)
+            if message is not None:
+                return message
+
+    def close(self) -> None:
+        self.dev.close()
+
+
 def open_session(link: HidLink) -> crypto.SessionChannel:
     host_priv = ec.PrivateKey(os.urandom(32))
     host_pub = host_priv.get_public_key().sec()
@@ -86,7 +116,7 @@ def request(link: HidLink, channel: crypto.SessionChannel, body: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--device", default="/dev/hidraw0", help="the SabiSigner's hidraw node")
+    parser.add_argument("--device", default="/dev/hidraw0", help="the SabiSigner's hidraw node, or 'hidapi'")
     parser.add_argument("command", choices=["get_version", "get_xpub", "sign_psbt", "authorize_coinjoin"])
     parser.add_argument("argument", nargs="?", help="derivation path, or a base64 psbt")
     parser.add_argument("--coordinator", default="wasabi.example")
@@ -95,7 +125,7 @@ def main() -> int:
     parser.add_argument("--max-total-fee-sat", type=int, default=5_000)
     args = parser.parse_args()
 
-    link = HidLink(args.device)
+    link = HidapiLink() if args.device == "hidapi" else HidLink(args.device)
     try:
         channel = open_session(link)
 
