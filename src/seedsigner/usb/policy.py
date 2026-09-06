@@ -150,7 +150,7 @@ class CoinjoinRoundSummary:
         return self.our_input_sat - self.our_output_sat
 
 
-def _is_under_account(path: list[int], account_path: list[int]) -> bool:
+def is_under_account(path: list[int], account_path: list[int]) -> bool:
     return len(path) >= len(account_path) and list(path[: len(account_path)]) == list(account_path)
 
 
@@ -242,7 +242,7 @@ def validate_coinjoin_psbt(
         if path is None:
             continue
 
-        if not _is_under_account(path, authorization.account_path):
+        if not is_under_account(path, authorization.account_path):
             raise CoinjoinPolicyError(
                 f"Input {i} at {bip32.path_to_str(path)} is outside the authorized account "
                 f"{bip32.path_to_str(authorization.account_path)}"
@@ -293,7 +293,7 @@ def validate_coinjoin_psbt(
         path = PSBTParser._get_seed_derivation_path(out, root, derivation_cache)
         if path is None:
             continue
-        if not _is_under_account(path, authorization.account_path):
+        if not is_under_account(path, authorization.account_path):
             raise CoinjoinPolicyError(
                 f"Output {i} at {bip32.path_to_str(path)} is outside the authorized account"
             )

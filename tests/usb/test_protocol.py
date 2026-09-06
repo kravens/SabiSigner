@@ -150,6 +150,66 @@ def test_a_round_that_fails_policy_is_an_error_even_when_authorized(session):
     assert call(session, {"t": "sign_coinjoin", "psbt": bad}, confirm=DENY)["t"] == "error"
 
 
+def test_ownership_proofs_need_a_live_authorization(session):
+    request = {"t": "get_ownership_proof", "path": "m/84'/0'/0'/0/0", "script_type": "p2wpkh", "commitment": ""}
+    assert call(session, request)["t"] == "error"
+
+    call(session, {**AUTH_REQUEST, "max_rounds": 1})
+    assert call(session, request)["t"] == "ok"
+
+    # Spend the only round; the authorization is used up and proofs stop with it.
+    call(session, {"t": "sign_coinjoin", "psbt": standard_round(session.seed).to_base64()}, confirm=DENY)
+    assert call(session, request)["t"] == "error"
+
+
+def test_ownership_proofs_are_unattended_and_verify(session):
+    from embit import script
+    from seedsigner.usb import slip19
+    from usb.coinjoin_util import make_root
+
+    call(session, dict(AUTH_REQUEST))
+    commitment = b"round-id||coordinator"
+    for script_type, path in [("p2wpkh", ACCOUNT_PATH + [0, 3]), ("p2tr", ACCOUNT_PATH + [1, 7])]:
+        request = {
+            "t": "get_ownership_proof",
+            "path": "m/" + "/".join(str(i - 2**31) + "'" if i >= 2**31 else str(i) for i in path),
+            "script_type": script_type,
+            "commitment": base64.b64encode(commitment).decode(),
+        }
+        # DENY: inside an authorization nothing may ask the user again.
+        response = call(session, request, confirm=DENY)
+        assert response["t"] == "ok", response
+
+        pubkey = make_root(session.seed).derive(path).key.get_public_key()
+        expected = script.p2wpkh(pubkey) if script_type == "p2wpkh" else script.p2tr(pubkey)
+        assert response["script_pubkey"] == expected.data.hex()
+        proof = base64.b64decode(response["proof"])
+        assert slip19.verify_proof(proof, expected, commitment, require_confirmation=True)
+
+
+def test_ownership_proofs_stay_inside_the_authorized_account(session):
+    from usb.coinjoin_util import OTHER_ACCOUNT_PATH
+
+    call(session, dict(AUTH_REQUEST))
+    outside = "m/84'/0'/1'/0/0"
+    response = call(session, {"t": "get_ownership_proof", "path": outside, "script_type": "p2wpkh", "commitment": ""})
+    assert response["t"] == "error"
+    assert "account" in response["message"]
+
+
+def test_ownership_proof_fields_are_checked(session):
+    call(session, dict(AUTH_REQUEST))
+    good = {"t": "get_ownership_proof", "path": "m/84'/0'/0'/0/0", "script_type": "p2wpkh", "commitment": ""}
+    for bad in [
+        {**good, "script_type": "p2sh"},
+        {**good, "script_type": 1},
+        {**good, "commitment": "not base64!"},
+        {**good, "commitment": "A" * 5000},
+        {**good, "path": "84'/0'/0'/0/0"},
+    ]:
+        assert call(session, bad)["t"] == "error", bad
+
+
 def test_authorization_fields_are_type_checked(session):
     for bad in [
         {**AUTH_REQUEST, "max_rounds": "5"},

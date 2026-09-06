@@ -364,11 +364,11 @@ def test_account_prefix_matching_is_not_fooled_by_a_shared_prefix(seed):
     m/84'/0'/0' must not authorize m/84'/0'/0 (unhardened) or a sibling that merely starts
     with the same integers.
     """
-    assert policy._is_under_account(ACCOUNT_PATH + [0, 0], ACCOUNT_PATH)
-    assert policy._is_under_account(ACCOUNT_PATH, ACCOUNT_PATH)
-    assert not policy._is_under_account(OTHER_ACCOUNT_PATH + [0, 0], ACCOUNT_PATH)
-    assert not policy._is_under_account([84 + 2**31, 0 + 2**31], ACCOUNT_PATH)
-    assert not policy._is_under_account([84 + 2**31, 0 + 2**31, 0], ACCOUNT_PATH)
+    assert policy.is_under_account(ACCOUNT_PATH + [0, 0], ACCOUNT_PATH)
+    assert policy.is_under_account(ACCOUNT_PATH, ACCOUNT_PATH)
+    assert not policy.is_under_account(OTHER_ACCOUNT_PATH + [0, 0], ACCOUNT_PATH)
+    assert not policy.is_under_account([84 + 2**31, 0 + 2**31], ACCOUNT_PATH)
+    assert not policy.is_under_account([84 + 2**31, 0 + 2**31, 0], ACCOUNT_PATH)
 
 
 class TestOwnershipIsBoundToTheScript:

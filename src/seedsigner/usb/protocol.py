@@ -26,7 +26,7 @@ from embit.psbt import PSBT
 
 from seedsigner.helpers.version import Version
 from seedsigner.models.settings import SettingsConstants
-from seedsigner.usb import policy
+from seedsigner.usb import policy, slip19
 
 
 logger = logging.getLogger(__name__)
@@ -97,12 +97,16 @@ def parse_derivation_path(path_str: str) -> list[int]:
     return path
 
 
-def _decode_psbt(request: dict) -> PSBT:
-    raw = _require_str(request, "psbt", max_len=MAX_PSBT_B64)
+def _decode_base64(request: dict, key: str, max_len: int) -> bytes:
+    raw = _require_str(request, key, max_len=max_len)
     try:
-        decoded = base64.b64decode(raw, validate=True)
+        return base64.b64decode(raw, validate=True)
     except (binascii.Error, ValueError) as e:
-        raise ProtocolError(f"psbt is not valid base64: {e}")
+        raise ProtocolError(f"{key} is not valid base64: {e}")
+
+
+def _decode_psbt(request: dict) -> PSBT:
+    decoded = _decode_base64(request, "psbt", max_len=MAX_PSBT_B64)
     try:
         return PSBT.parse(decoded)
     except Exception as e:
@@ -232,12 +236,57 @@ class UsbSession:
             "fee_remaining_sat": self.authorization.fee_remaining_sat,
         }
 
+    def _handle_get_ownership_proof(self, request: dict, confirm) -> dict:
+        """
+        A SLIP-19 proof that one of our keys owns its scriptPubKey, over a commitment the
+        coordinator chose. Wasabi needs one per input before a round will register it.
+
+        Unattended, like sign_coinjoin, and for the same reason: a round asks for one per
+        input, minutes before signing, while the user is elsewhere. What keeps it from being
+        a free oracle is that it exists only inside a live coinjoin authorization and only
+        for keys under the account the user approved -- the same scope the round may spend.
+        A proof reveals that a script is ours, to a coordinator that is about to see us
+        spend it anyway; it reveals nothing about any other key.
+
+        The scriptPubKey is not taken from the host. The device derives the key and rebuilds
+        the script itself, so the proof is for what the path really pays. The flag says the
+        user confirmed, because they did: the authorization prompt is that confirmation, and
+        Wasabi's coordinator refuses proofs without it.
+        """
+        self._require_seed()
+        if self.authorization is None or not self.authorization.is_live:
+            raise ProtocolError("No live coinjoin authorization in this session")
+
+        path = parse_derivation_path(_require_str(request, "path"))
+        script_type = _require_str(request, "script_type", max_len=16)
+        if script_type not in slip19.SCRIPT_TYPES:
+            raise ProtocolError(f"script_type must be one of {', '.join(slip19.SCRIPT_TYPES)}")
+        commitment = _decode_base64(request, "commitment", max_len=4 * 1024)
+
+        if not policy.is_under_account(path, self.authorization.account_path):
+            raise ProtocolError("Path is outside the authorized coinjoin account")
+
+        from embit import bip32
+        from embit.networks import NETWORKS
+        root = bip32.HDKey.from_seed(
+            self.seed.seed_bytes,
+            version=NETWORKS[SettingsConstants.map_network_to_embit(self.network)]["xprv"],
+        )
+        proof, script_pubkey = slip19.create_proof(
+            root, self.seed.seed_bytes, script_type, path, commitment, flags=slip19.USER_CONFIRMATION
+        )
+        return {
+            "proof": base64.b64encode(proof).decode("ascii"),
+            "script_pubkey": script_pubkey.data.hex(),
+        }
+
     _HANDLERS = {
         "get_version": _handle_get_version,
         "get_xpub": _handle_get_xpub,
         "sign_psbt": _handle_sign_psbt,
         "authorize_coinjoin": _handle_authorize_coinjoin,
         "sign_coinjoin": _handle_sign_coinjoin,
+        "get_ownership_proof": _handle_get_ownership_proof,
     }
 
     # -- entry point -------------------------------------------------------------------

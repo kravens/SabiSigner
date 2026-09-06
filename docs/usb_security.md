@@ -8,7 +8,7 @@ documentation oversells it is worse than one that has no USB at all.
 
 ## What the device will do over USB
 
-Five requests exist. There is no sixth.
+Six requests exist. There is no seventh.
 
 | Request | Needs a seed | Asks the user | Notes |
 |---|---|---|---|
@@ -17,6 +17,17 @@ Five requests exist. There is no sixth.
 | `sign_psbt` | yes | yes | Same review the QR flow gives |
 | `authorize_coinjoin` | yes | yes | Grants unattended signing within a budget |
 | `sign_coinjoin` | yes | **no** | Checked by policy, not by a human |
+| `get_ownership_proof` | yes | **no** | SLIP-19 proof for one key; only inside a live authorization, only under the authorized account |
+
+The ownership proof deserves a word, since it is the one request added after the set
+above was fixed. A WabiSabi coordinator registers an input only with a SLIP-19 proof that
+the input's key signed a commitment it chose, so a round needs one per input, minutes before
+signing, while the user is elsewhere. It therefore sits under the same rule as
+`sign_coinjoin`: no authorization, no proof; and no proof for a key outside the account
+the user approved. What it reveals is that a script is ours, to a coordinator about to
+watch us spend it, which the authorization already conceded. It reveals nothing about any
+other key, and the scriptPubKey is rebuilt on the device from the derived key rather than
+taken from the host, so the host cannot obtain a proof for a script the path does not pay.
 
 There is no request that exports a seed, dumps entropy, reads an arbitrary file, or
 executes anything. This is not a filter that could be bypassed: the device has no such

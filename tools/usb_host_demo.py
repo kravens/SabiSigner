@@ -117,17 +117,28 @@ def request(link: HidLink, channel: crypto.SessionChannel, body: dict) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", default="/dev/hidraw0", help="the SabiSigner's hidraw node, or 'hidapi'")
-    parser.add_argument("command", choices=["get_version", "get_xpub", "sign_psbt", "authorize_coinjoin"])
+    parser.add_argument("command", choices=["get_version", "get_xpub", "sign_psbt", "authorize_coinjoin", "get_ownership_proof"])
     parser.add_argument("argument", nargs="?", help="derivation path, or a base64 psbt")
     parser.add_argument("--coordinator", default="wasabi.example")
     parser.add_argument("--max-rounds", type=int, default=5)
     parser.add_argument("--max-fee-per-round-sat", type=int, default=1_000)
     parser.add_argument("--max-total-fee-sat", type=int, default=5_000)
+    parser.add_argument("--script-type", choices=["p2wpkh", "p2tr"], default="p2wpkh")
+    parser.add_argument("--commitment", default="demo", help="commitment data for get_ownership_proof (utf-8)")
     args = parser.parse_args()
 
     link = HidapiLink() if args.device == "hidapi" else HidLink(args.device)
     try:
         channel = open_session(link)
+
+        authorize = {
+            "t": "authorize_coinjoin",
+            "coordinator": args.coordinator,
+            "account_path": args.argument or "m/84'/0'/0'",
+            "max_rounds": args.max_rounds,
+            "max_fee_per_round_sat": args.max_fee_per_round_sat,
+            "max_total_fee_sat": args.max_total_fee_sat,
+        }
 
         if args.command == "get_version":
             body = {"t": "get_version"}
@@ -137,15 +148,20 @@ def main() -> int:
             if not args.argument:
                 parser.error("sign_psbt needs a base64 psbt")
             body = {"t": "sign_psbt", "psbt": args.argument}
-        else:
+        elif args.command == "get_ownership_proof":
+            # A proof exists only inside a live authorization, so authorize the account the
+            # path sits in first (m/purpose'/coin'/account'), then ask for the proof.
+            path = args.argument or "m/84'/0'/0'/0/0"
+            authorize["account_path"] = "/".join(path.split("/")[:4])
+            print(json.dumps(request(link, channel, authorize), indent=2))
             body = {
-                "t": "authorize_coinjoin",
-                "coordinator": args.coordinator,
-                "account_path": args.argument or "m/84'/0'/0'",
-                "max_rounds": args.max_rounds,
-                "max_fee_per_round_sat": args.max_fee_per_round_sat,
-                "max_total_fee_sat": args.max_total_fee_sat,
+                "t": "get_ownership_proof",
+                "path": path,
+                "script_type": args.script_type,
+                "commitment": base64.b64encode(args.commitment.encode("utf-8")).decode("ascii"),
             }
+        else:
+            body = authorize
 
         print(json.dumps(request(link, channel, body), indent=2))
     finally:
