@@ -161,7 +161,13 @@ class UsbSession:
             derivation_path=canonical_path,
             embit_network=SettingsConstants.map_network_to_embit(self.network),
         )
-        return {"xpub": xpub.to_base58(), "path": canonical_path}
+        # The master fingerprint is what a wallet file keys the xpub by; the user has just
+        # approved exporting a public key of this seed, and the fingerprint reveals less.
+        return {
+            "xpub": xpub.to_base58(),
+            "path": canonical_path,
+            "fingerprint": self.seed.get_fingerprint(self.network),
+        }
 
     def _handle_sign_psbt(self, request: dict, confirm) -> dict:
         """

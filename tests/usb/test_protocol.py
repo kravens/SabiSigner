@@ -84,6 +84,7 @@ def test_get_xpub_requires_confirmation(session):
     allowed = call(session, {"t": "get_xpub", "path": "m/84'/0'/0'"}, confirm=ALLOW)
     assert allowed["t"] == "ok"
     assert allowed["xpub"].startswith("xpub")
+    assert allowed["fingerprint"] == session.seed.get_fingerprint()
 
 
 def test_get_xpub_canonicalizes_the_path(session):
